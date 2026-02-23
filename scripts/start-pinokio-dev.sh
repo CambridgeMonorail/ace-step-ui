@@ -61,7 +61,7 @@ sleep 5
 
 # Start backend
 echo "[2/3] Starting Backend Server (port 3001)..."
-cd "$(dirname "$0")/server"
+cd "$(dirname "$0")/../server"
 ACESTEP_PATH="$ACESTEP_PATH" npm run dev > /tmp/acestep-backend.log 2>&1 &
 PIDS+=($!)
 cd - > /dev/null
@@ -72,7 +72,7 @@ sleep 3
 
 # Start frontend (Vite dev server)
 echo "[3/3] Starting Frontend Dev Server (port 5173)..."
-cd "$(dirname "$0")"
+cd "$(dirname "$0")/.."
 npm run dev > /tmp/acestep-frontend.log 2>&1 &
 PIDS+=($!)
 

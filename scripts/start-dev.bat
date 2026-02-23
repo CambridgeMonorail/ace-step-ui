@@ -71,7 +71,7 @@ timeout /t 5 /nobreak >nul
 
 REM Start backend in new window with ACESTEP_PATH
 echo [2/3] Starting backend server...
-start "Backend Server - DEBUG" cmd /k "cd /d "%~dp0server" && set ACESTEP_PATH=%ACESTEP_PATH% && npm run dev"
+start "Backend Server - DEBUG" cmd /k "cd /d "%~dp0..\server" && set ACESTEP_PATH=%ACESTEP_PATH% && npm run dev"
 
 REM Wait for backend to start
 echo Waiting for backend to start...
@@ -79,7 +79,7 @@ timeout /t 3 /nobreak >nul
 
 REM Start frontend in new window (Vite dev server)
 echo [3/3] Starting frontend dev server...
-start "Frontend Dev Server - DEBUG" cmd /k "cd /d "%~dp0" && npm run dev"
+start "Frontend Dev Server - DEBUG" cmd /k "cd /d "%~dp0.." && npm run dev"
 
 REM Wait a moment
 timeout /t 2 /nobreak >nul
