@@ -44,13 +44,25 @@ export function resetGradioClient(): void {
  */
 export async function isGradioAvailable(): Promise<boolean> {
   try {
+    // Try OpenAI API endpoint first (newer ACE-Step versions)
+    const openaiUrl = `${config.acestep.apiUrl}/v1/models`;
     const controller = new AbortController();
     const timeout = setTimeout(() => controller.abort(), 3000);
-    const response = await fetch(`${config.acestep.apiUrl}/gradio_api/info`, {
+    const response = await fetch(openaiUrl, {
       signal: controller.signal,
     });
     clearTimeout(timeout);
-    return response.ok;
+    if (response.ok) return true;
+
+    // Fallback: try Gradio endpoint (older ACE-Step versions)
+    const gradioUrl = `${config.acestep.apiUrl}/gradio_api/info`;
+    const controller2 = new AbortController();
+    const timeout2 = setTimeout(() => controller2.abort(), 3000);
+    const response2 = await fetch(gradioUrl, {
+      signal: controller2.signal,
+    });
+    clearTimeout(timeout2);
+    return response2.ok;
   } catch {
     return false;
   }

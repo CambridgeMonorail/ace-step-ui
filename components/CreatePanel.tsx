@@ -25,6 +25,7 @@ interface CreatePanelProps {
   createdSongs?: Song[];
   pendingAudioSelection?: { target: 'reference' | 'source'; url: string; title?: string } | null;
   onAudioSelectionApplied?: () => void;
+  serviceHealth?: { healthy: boolean; error?: string } | null;
 }
 
 const KEY_SIGNATURES = [
@@ -116,6 +117,7 @@ export const CreatePanel: React.FC<CreatePanelProps> = ({
   createdSongs = [],
   pendingAudioSelection,
   onAudioSelectionApplied,
+  serviceHealth,
 }) => {
   const { isAuthenticated, token, user } = useAuth();
   const { t } = useI18n();
@@ -164,26 +166,26 @@ export const CreatePanel: React.FC<CreatePanelProps> = ({
     const stored = localStorage.getItem('ace-bulkCount');
     return stored ? Number(stored) : 1;
   });
-  const [guidanceScale, setGuidanceScale] = useState(9.0);
+  const [guidanceScale, setGuidanceScale] = useState(7.0);
   const [randomSeed, setRandomSeed] = useState(true);
   const [seed, setSeed] = useState(-1);
   const [thinking, setThinking] = useState(false); // Default false for GPU compatibility
   const [enhance, setEnhance] = useState(false); // AI Enhance: uses LLM to enrich caption & generate metadata
   const [audioFormat, setAudioFormat] = useState<'mp3' | 'flac'>('mp3');
-  const [inferenceSteps, setInferenceSteps] = useState(12);
+  const [inferenceSteps, setInferenceSteps] = useState(8);
   const [inferMethod, setInferMethod] = useState<'ode' | 'sde'>('ode');
   const [lmBackend, setLmBackend] = useState<'pt' | 'vllm'>('pt');
-  const [lmModel, setLmModel] = useState(() => {
-    return localStorage.getItem('ace-lmModel') || 'acestep-5Hz-lm-0.6B';
+  const [lmModelPath, setLmModelPath] = useState(() => {
+    return localStorage.getItem('ace-lmModel') || 'acestep-5Hz-lm-4B';
   });
   const [shift, setShift] = useState(3.0);
 
   // LM Parameters (under Expert)
   const [showLmParams, setShowLmParams] = useState(false);
-  const [lmTemperature, setLmTemperature] = useState(0.8);
-  const [lmCfgScale, setLmCfgScale] = useState(2.2);
+  const [lmTemperature, setLmTemperature] = useState(0.85);
+  const [lmCfgScale, setLmCfgScale] = useState(2.5);
   const [lmTopK, setLmTopK] = useState(0);
-  const [lmTopP, setLmTopP] = useState(0.92);
+  const [lmTopP, setLmTopP] = useState(0.9);
   const [lmNegativePrompt, setLmNegativePrompt] = useState('NO USER INPUT');
 
   // Expert Parameters (now in Advanced section)
@@ -615,6 +617,33 @@ export const CreatePanel: React.FC<CreatePanelProps> = ({
     }
   }, [duration, activeMaxDuration]);
 
+  // Expose test helpers to window object for automated testing (dev only)
+  useEffect(() => {
+    if (typeof window !== 'undefined' && import.meta.env.DEV) {
+      (window as any).__testHelpers = {
+        setSongDescription,
+        setLyrics,
+        setStyle,
+        setCustomMode,
+        setInstrumental,
+        isFormValid,
+        getFormState: () => ({
+          songDescription,
+          lyrics,
+          style,
+          customMode,
+          instrumental,
+          isFormValid: isFormValid(),
+        }),
+      };
+    }
+    return () => {
+      if (typeof window !== 'undefined' && import.meta.env.DEV) {
+        delete (window as any).__testHelpers;
+      }
+    };
+  }, [songDescription, lyrics, style, customMode, instrumental]);
+
   useEffect(() => {
     const getDragKind = (e: DragEvent): 'file' | 'audio' | null => {
       if (!e.dataTransfer) return null;
@@ -697,14 +726,14 @@ export const CreatePanel: React.FC<CreatePanelProps> = ({
       const result = await generateApi.formatInput({
         caption: style,
         lyrics: lyrics,
-        bpm: bpm > 0 ? bpm : undefined,
-        duration: duration > 0 ? duration : undefined,
+        bpm: (typeof bpm === 'number' && bpm > 0) ? bpm : undefined,
+        duration: (typeof duration === 'number' && duration > 0) ? duration : undefined,
         keyScale: keyScale || undefined,
         timeSignature: timeSignature || undefined,
         temperature: lmTemperature,
-        topK: lmTopK > 0 ? lmTopK : undefined,
+        topK: (typeof lmTopK === 'number' && lmTopK > 0) ? lmTopK : undefined,
         topP: lmTopP,
-        lmModel: lmModel || 'acestep-5Hz-lm-0.6B',
+        lmModel: lmModelPath || 'acestep-5Hz-lm-0.6B',
         lmBackend: lmBackend || 'pt',
       }, token);
 
@@ -965,8 +994,22 @@ export const CreatePanel: React.FC<CreatePanelProps> = ({
     }
   };
 
+  // Check if required fields are filled based on mode
+  const isFormValid = (): boolean => {
+    if (!customMode) {
+      // Simple mode: song description is required
+      return songDescription.trim().length > 0;
+    } else {
+      // Custom mode: at least one of style, lyrics, or reference audio is required
+      return style.trim().length > 0 || lyrics.trim().length > 0 || referenceAudioUrl.length > 0;
+    }
+  };
+
   const handleGenerate = () => {
     const styleWithGender = (() => {
+      // In Simple Mode, don't modify style (let autogen handle it)
+      if (!customMode) return style;
+      
       if (!vocalGender) return style;
       const genderHint = vocalGender === 'male' ? 'Male vocals' : 'Female vocals';
       const trimmed = style.trim();
@@ -1003,12 +1046,15 @@ export const CreatePanel: React.FC<CreatePanelProps> = ({
         batchSize,
         randomSeed: randomSeed || i > 0, // Force random for subsequent bulk jobs
         seed: jobSeed,
-        thinking,
+        thinking: !customMode || thinking, // Enable LLM in Simple Mode
         enhance,
         audioFormat,
         inferMethod,
         lmBackend,
-        lmModel,
+        lmModelPath,
+        // Simple Mode: Use sample_mode for auto-generation of lyrics/caption
+        sampleMode: !customMode && !!songDescription.trim(),
+        sampleQuery: !customMode ? songDescription.trim() : undefined,
         shift,
         lmTemperature,
         lmCfgScale,
@@ -1031,8 +1077,12 @@ export const CreatePanel: React.FC<CreatePanelProps> = ({
         customTimesteps: customTimesteps.trim() || undefined,
         useCotMetas,
         useCotCaption,
-        useCotLanguage,
-        autogen,
+        // In Simple Mode, disable CoT language detection when user explicitly selected
+        // a language (not "unknown"/Auto) so the LM respects the user's choice.
+        useCotLanguage: !customMode && vocalLanguage !== 'unknown'
+          ? false
+          : useCotLanguage,
+        autogen: !customMode || autogen, // Auto-generate in Simple Mode
         constrainedDecodingDebug,
         allowLmBatch,
         getScores,
@@ -1234,6 +1284,7 @@ export const CreatePanel: React.FC<CreatePanelProps> = ({
                 </button>
               </div>
               <textarea
+                data-testid="song-description-input"
                 value={songDescription}
                 onChange={(e) => setSongDescription(e.target.value)}
                 placeholder={t('songDescriptionPlaceholder')}
@@ -1295,9 +1346,9 @@ export const CreatePanel: React.FC<CreatePanelProps> = ({
                 max={activeMaxDuration}
                 step={5}
                 onChange={setDuration}
-                formatDisplay={(val) => val === -1 ? t('auto') : `${val}${t('seconds')}`}
-                title={''}
-                autoLabel={t('auto')}
+                formatDisplay={(val) => val === -1 ? `${t('auto')} (60s)` : `${val}${t('seconds')}`}
+                title={duration === -1 ? t('autoDurationTooltip') : ''}
+                autoLabel={`${t('auto')} (60s)`}
               />
 
               {/* BPM */}
@@ -1567,8 +1618,8 @@ export const CreatePanel: React.FC<CreatePanelProps> = ({
                     {instrumental ? t('instrumental') : t('vocal')}
                   </button>
                   <button
-                    className={`p-1.5 hover:bg-zinc-200 dark:hover:bg-white/10 rounded transition-colors ${isFormattingLyrics ? 'text-pink-500' : 'text-zinc-500 hover:text-black dark:hover:text-white'}`}
-                    title="AI Format - Enhance style & auto-fill parameters"
+                    className={`p-1.5 hover:bg-zinc-200 dark:hover:bg-white/10 rounded transition-colors disabled:opacity-50 disabled:cursor-not-allowed ${isFormattingLyrics ? 'text-pink-500' : 'text-zinc-500 hover:text-black dark:hover:text-white'}`}
+                    title={t('formatLyricsTooltip')}
                     onClick={() => handleFormat('lyrics')}
                     disabled={isFormattingLyrics || !style.trim()}
                   >
@@ -1583,6 +1634,7 @@ export const CreatePanel: React.FC<CreatePanelProps> = ({
                 </div>
               </div>
               <textarea
+                data-testid="lyrics-input"
                 disabled={instrumental}
                 value={lyrics}
                 onChange={(e) => setLyrics(e.target.value)}
@@ -1631,8 +1683,8 @@ export const CreatePanel: React.FC<CreatePanelProps> = ({
                     <Trash2 size={14} />
                   </button>
                   <button
-                    className={`p-1.5 hover:bg-zinc-200 dark:hover:bg-white/10 rounded transition-colors ${isFormattingStyle ? 'text-pink-500' : 'text-zinc-500 hover:text-black dark:hover:text-white'}`}
-                    title="AI Format - Enhance style & auto-fill parameters"
+                    className={`p-1.5 hover:bg-zinc-200 dark:hover:bg-white/10 rounded transition-colors disabled:opacity-50 disabled:cursor-not-allowed ${isFormattingStyle ? 'text-pink-500' : 'text-zinc-500 hover:text-black dark:hover:text-white'}`}
+                    title={t('formatStyleTooltip')}
                     onClick={() => handleFormat('style')}
                     disabled={isFormattingStyle || !style.trim()}
                   >
@@ -1641,6 +1693,7 @@ export const CreatePanel: React.FC<CreatePanelProps> = ({
                 </div>
               </div>
               <textarea
+                data-testid="style-input"
                 value={style}
                 onChange={(e) => setStyle(e.target.value)}
                 placeholder={t('stylePlaceholder')}
@@ -1914,9 +1967,9 @@ export const CreatePanel: React.FC<CreatePanelProps> = ({
               max={600}
               step={5}
               onChange={setDuration}
-              formatDisplay={(val) => val === -1 ? t('auto') : `${val}${t('seconds')}`}
-              autoLabel={t('auto')}
-              helpText={`${t('auto')} - 10 ${t('min')}`}
+              formatDisplay={(val) => val === -1 ? `${t('auto')} (60s)` : `${val}${t('seconds')}`}
+              autoLabel={`${t('auto')} (60s)`}
+              helpText={`${t('auto')} (60s) - 10 ${t('min')}`}
             />
 
             {/* Batch Size */}
@@ -2026,8 +2079,8 @@ export const CreatePanel: React.FC<CreatePanelProps> = ({
             <div className="space-y-1.5">
               <label className="text-xs font-medium text-zinc-600 dark:text-zinc-400">{t('lmModelLabel')}</label>
               <select
-                value={lmModel}
-                onChange={(e) => { const v = e.target.value; setLmModel(v); localStorage.setItem('ace-lmModel', v); }}
+                value={lmModelPath}
+                onChange={(e) => { const v = e.target.value; setLmModelPath(v); localStorage.setItem('ace-lmModel', v); }}
                 className="w-full bg-zinc-50 dark:bg-black/20 border border-zinc-200 dark:border-white/10 rounded-lg px-2 py-1.5 text-xs text-zinc-900 dark:text-white focus:outline-none"
               >
                 <option value="acestep-5Hz-lm-0.6B">{t('lmModel06B')}</option>
@@ -2065,17 +2118,19 @@ export const CreatePanel: React.FC<CreatePanelProps> = ({
               <p className="text-[10px] text-zinc-500">{randomSeed ? t('randomSeedRecommended') : t('fixedSeedReproducible')}</p>
             </div>
 
-            {/* Thinking Toggle */}
-            <div className="flex items-center justify-between py-2 border-t border-zinc-100 dark:border-white/5">
-              <span className={`text-xs font-medium ${loraLoaded ? 'text-zinc-400 dark:text-zinc-600' : 'text-zinc-600 dark:text-zinc-400'}`} title="Lets the lyric model reason about structure and metadata. Slightly slower.">{t('thinkingCot')}</span>
-              <button
-                onClick={() => !loraLoaded && setThinking(!thinking)}
-                disabled={loraLoaded}
-                className={`w-10 h-5 rounded-full flex items-center transition-colors duration-200 px-0.5 border border-zinc-200 dark:border-white/5 ${thinking ? 'bg-pink-600' : 'bg-zinc-300 dark:bg-black/40'} ${loraLoaded ? 'opacity-50 cursor-not-allowed' : 'cursor-pointer'}`}
-              >
-                <div className={`w-4 h-4 rounded-full bg-white transform transition-transform duration-200 shadow-sm ${thinking ? 'translate-x-5' : 'translate-x-0'}`} />
-              </button>
-            </div>
+            {/* Thinking Toggle (Custom Mode only - Simple Mode always uses thinking=true) */}
+            {customMode && (
+              <div className="flex items-center justify-between py-2 border-t border-zinc-100 dark:border-white/5">
+                <span className={`text-xs font-medium ${loraLoaded ? 'text-zinc-400 dark:text-zinc-600' : 'text-zinc-600 dark:text-zinc-400'}`} title="Lets the lyric model reason about structure and metadata. Slightly slower.">{t('thinkingCot')}</span>
+                <button
+                  onClick={() => !loraLoaded && setThinking(!thinking)}
+                  disabled={loraLoaded}
+                  className={`w-10 h-5 rounded-full flex items-center transition-colors duration-200 px-0.5 border border-zinc-200 dark:border-white/5 ${thinking ? 'bg-pink-600' : 'bg-zinc-300 dark:bg-black/40'} ${loraLoaded ? 'opacity-50 cursor-not-allowed' : 'cursor-pointer'}`}
+                >
+                  <div className={`w-4 h-4 rounded-full bg-white transform transition-transform duration-200 shadow-sm ${thinking ? 'translate-x-5' : 'translate-x-0'}`} />
+                </button>
+              </div>
+            )}
 
             {/* Shift */}
             <EditableSlider
@@ -2769,10 +2824,21 @@ export const CreatePanel: React.FC<CreatePanelProps> = ({
 
       {/* Footer Create Button */}
       <div className="p-4 mt-auto sticky bottom-0 bg-zinc-50/95 dark:bg-suno-panel/95 backdrop-blur-sm z-10 border-t border-zinc-200 dark:border-white/5 space-y-3">
+        {/* Service Health Status Indicator */}
+        {serviceHealth && !serviceHealth.healthy && (
+          <div className="flex items-center gap-2 px-3 py-2 bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800/50 rounded-lg text-xs text-red-700 dark:text-red-300">
+            <span className="w-2 h-2 rounded-full bg-red-500 animate-pulse"></span>
+            <span className="flex-1">
+              {serviceHealth.error || t('servicesUnavailable')}
+            </span>
+          </div>
+        )}
+        
         <button
+          data-testid="create-button"
           onClick={handleGenerate}
-          className="w-full h-12 rounded-xl font-bold text-base flex items-center justify-center gap-2 transition-all transform active:scale-[0.98] bg-gradient-to-r from-orange-500 to-pink-600 text-white shadow-lg hover:brightness-110"
-          disabled={isGenerating || !isAuthenticated}
+          className="w-full h-12 rounded-xl font-bold text-base flex items-center justify-center gap-2 transition-all transform active:scale-[0.98] bg-gradient-to-r from-orange-500 to-pink-600 text-white shadow-lg hover:brightness-110 disabled:opacity-50 disabled:cursor-not-allowed"
+          disabled={isGenerating || !isAuthenticated || !isFormValid() || !serviceHealth?.healthy}
         >
           <Sparkles size={18} />
           <span>

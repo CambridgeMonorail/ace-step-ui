@@ -357,6 +357,49 @@ start.bat
 
 ---
 
+## 🛠️ Development Mode
+
+For active development with **hot reload** and live debugging:
+
+### Quick Start - Pinokio Users
+
+**Windows:**
+```batch
+scripts\start-pinokio-dev.bat
+```
+
+**Linux/macOS:**
+```bash
+./scripts/start-pinokio-dev.sh
+```
+
+### Quick Start - Other Installations
+
+**Windows:**
+```batch
+set ACESTEP_PATH=C:\path\to\ACE-Step-1.5
+scripts\start-dev.bat
+```
+
+**Linux/macOS:**
+```bash
+export ACESTEP_PATH=/path/to/ACE-Step-1.5
+./scripts/start-dev.sh
+```
+
+### What's Different in Dev Mode?
+
+| Feature | Production | Development |
+|---------|-----------|-------------|
+| **Hot Reload** | No | ✅ Yes - instant updates on file save |
+| **Source Maps** | No | ✅ Yes - easier debugging |
+| **Logs** | Separate CMD windows | Separate terminals with live output |
+| **Use Case** | Testing final build | Active coding & debugging |
+
+Both modes use the same ports (3000, 3001, 8001) - dev mode just adds hot reload for faster development!
+
+---
+
 ## ⚙️ Configuration
 
 Edit `server/.env`:

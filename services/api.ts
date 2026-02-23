@@ -266,6 +266,7 @@ export interface GenerationParams {
   randomSeed?: boolean;
   seed?: number;
   thinking?: boolean;
+  enhance?: boolean;
   audioFormat?: 'mp3' | 'flac';
   inferMethod?: 'ode' | 'sde';
   shift?: number;
@@ -277,7 +278,11 @@ export interface GenerationParams {
   lmTopP?: number;
   lmNegativePrompt?: string;
   lmBackend?: 'pt' | 'vllm';
-  lmModel?: string;
+  lmModelPath?: string;
+
+  // Sample Mode (for Simple Mode auto-generation)
+  sampleMode?: boolean;
+  sampleQuery?: string;
 
   // Expert Parameters
   referenceAudioUrl?: string;
@@ -418,6 +423,11 @@ export const generateApi = {
     scale: number;
     path: string;
   }> => api('/api/lora/status', { token }),
+
+  checkHealth: (): Promise<{
+    healthy: boolean;
+    error?: string;
+  }> => api('/api/generate/health'),
 };
 
 // Users API
