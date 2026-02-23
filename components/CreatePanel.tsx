@@ -1046,7 +1046,7 @@ export const CreatePanel: React.FC<CreatePanelProps> = ({
         batchSize,
         randomSeed: randomSeed || i > 0, // Force random for subsequent bulk jobs
         seed: jobSeed,
-        thinking: !customMode || thinking, // Enable LLM in Simple Mode
+        thinking,
         enhance,
         audioFormat,
         inferMethod,
@@ -2118,19 +2118,17 @@ export const CreatePanel: React.FC<CreatePanelProps> = ({
               <p className="text-[10px] text-zinc-500">{randomSeed ? t('randomSeedRecommended') : t('fixedSeedReproducible')}</p>
             </div>
 
-            {/* Thinking Toggle (Custom Mode only - Simple Mode always uses thinking=true) */}
-            {customMode && (
-              <div className="flex items-center justify-between py-2 border-t border-zinc-100 dark:border-white/5">
-                <span className={`text-xs font-medium ${loraLoaded ? 'text-zinc-400 dark:text-zinc-600' : 'text-zinc-600 dark:text-zinc-400'}`} title="Lets the lyric model reason about structure and metadata. Slightly slower.">{t('thinkingCot')}</span>
-                <button
-                  onClick={() => !loraLoaded && setThinking(!thinking)}
-                  disabled={loraLoaded}
-                  className={`w-10 h-5 rounded-full flex items-center transition-colors duration-200 px-0.5 border border-zinc-200 dark:border-white/5 ${thinking ? 'bg-pink-600' : 'bg-zinc-300 dark:bg-black/40'} ${loraLoaded ? 'opacity-50 cursor-not-allowed' : 'cursor-pointer'}`}
-                >
-                  <div className={`w-4 h-4 rounded-full bg-white transform transition-transform duration-200 shadow-sm ${thinking ? 'translate-x-5' : 'translate-x-0'}`} />
-                </button>
-              </div>
-            )}
+            {/* Thinking Toggle - controls LM audio conditioning (LM-DiT pathway), not metadata generation */}
+            <div className="flex items-center justify-between py-2 border-t border-zinc-100 dark:border-white/5">
+              <span className={`text-xs font-medium ${loraLoaded ? 'text-zinc-400 dark:text-zinc-600' : 'text-zinc-600 dark:text-zinc-400'}`} title="Lets the lyric model reason about structure and metadata. Slightly slower.">{t('thinkingCot')}</span>
+              <button
+                onClick={() => !loraLoaded && setThinking(!thinking)}
+                disabled={loraLoaded}
+                className={`w-10 h-5 rounded-full flex items-center transition-colors duration-200 px-0.5 border border-zinc-200 dark:border-white/5 ${thinking ? 'bg-pink-600' : 'bg-zinc-300 dark:bg-black/40'} ${loraLoaded ? 'opacity-50 cursor-not-allowed' : 'cursor-pointer'}`}
+              >
+                <div className={`w-4 h-4 rounded-full bg-white transform transition-transform duration-200 shadow-sm ${thinking ? 'translate-x-5' : 'translate-x-0'}`} />
+              </button>
+            </div>
 
             {/* Shift */}
             <EditableSlider
@@ -2838,7 +2836,7 @@ export const CreatePanel: React.FC<CreatePanelProps> = ({
           data-testid="create-button"
           onClick={handleGenerate}
           className="w-full h-12 rounded-xl font-bold text-base flex items-center justify-center gap-2 transition-all transform active:scale-[0.98] bg-gradient-to-r from-orange-500 to-pink-600 text-white shadow-lg hover:brightness-110 disabled:opacity-50 disabled:cursor-not-allowed"
-          disabled={isGenerating || !isAuthenticated || !isFormValid() || !serviceHealth?.healthy}
+          disabled={isGenerating || !isAuthenticated || !isFormValid() || serviceHealth?.healthy === false}
         >
           <Sparkles size={18} />
           <span>
