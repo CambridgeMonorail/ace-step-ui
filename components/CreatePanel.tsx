@@ -642,7 +642,7 @@ export const CreatePanel: React.FC<CreatePanelProps> = ({
         delete (window as any).__testHelpers;
       }
     };
-  }, [songDescription, lyrics, style, customMode, instrumental]);
+  }, [songDescription, lyrics, style, customMode, instrumental, referenceAudioUrl]);
 
   useEffect(() => {
     const getDragKind = (e: DragEvent): 'file' | 'audio' | null => {
