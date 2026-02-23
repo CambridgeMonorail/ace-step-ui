@@ -827,9 +827,15 @@ async function processGenerationViaRestAPI(
 
       // Extract metadata from the first result item (§5.3 result field description)
       const first = resultItems[0];
+      const apiDuration = typeof first.metas?.duration === 'number' && first.metas.duration > 0
+        ? first.metas.duration
+        : undefined;
+      const paramDuration = typeof params.duration === 'number' && params.duration > 0
+        ? params.duration
+        : undefined;
       const finalDuration = actualDuration > 0
         ? actualDuration
-        : (first.metas?.duration || params.duration || 60);
+        : (apiDuration ?? paramDuration ?? 60);
 
       // Generate a title since the API doesn't return one.
       // Priority: params.title (user-provided) > derive from sampleQuery > derive from caption
