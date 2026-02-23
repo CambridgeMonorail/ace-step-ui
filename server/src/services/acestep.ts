@@ -326,7 +326,7 @@ interface GenerationResult {
   keyScale?: string;
   timeSignature?: string;
   status: string;
-  // Auto-generated metadata (from Simple Mode with thinking=true)
+  // Auto-generated metadata populated via sample_mode (independent of thinking)
   title?: string;
   lyrics?: string;
   caption?: string;
@@ -853,7 +853,7 @@ async function processGenerationViaRestAPI(
         bpm: first.metas?.bpm || params.bpm,
         keyScale: first.metas?.keyscale || params.keyScale,
         timeSignature: first.metas?.timesignature || params.timeSignature,
-        // Auto-generated metadata from sample_mode / thinking
+        // Auto-generated metadata from sample_mode (independent of thinking)
         title: autoTitle,
         lyrics: first.lyrics,
         caption: first.prompt,  // §5.3: "prompt" field contains the generated/enhanced caption
