@@ -964,9 +964,15 @@ async function processGenerationViaGradio(
   // Parse metadata from generation details if available
   const metas = parseGenerationDetails(genDetails);
 
+  const metaDuration = typeof metas.duration === 'number' && metas.duration > 0
+    ? metas.duration
+    : undefined;
+  const paramDuration = typeof params.duration === 'number' && params.duration > 0
+    ? params.duration
+    : undefined;
   const finalDuration = actualDuration > 0
     ? actualDuration
-    : (metas.duration || params.duration || 60);
+    : (metaDuration ?? paramDuration ?? 60);
 
   job.status = 'succeeded';
   job.result = {
