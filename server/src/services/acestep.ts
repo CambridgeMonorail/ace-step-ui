@@ -630,7 +630,7 @@ async function processGenerationViaRestAPI(
     // ── Seed ───────────────────────────────────────────────────────────
     // docs: use_random_seed=true & seed=-1 → random
     use_random_seed: params.randomSeed !== false,
-    ...(params.randomSeed === false && params.seed && { seed: params.seed }),
+    ...(params.randomSeed === false && typeof params.seed === 'number' && { seed: params.seed }),
 
     // ── Model selection ────────────────────────────────────────────────
     // docs: parameter is "model", NOT "dit_model"
