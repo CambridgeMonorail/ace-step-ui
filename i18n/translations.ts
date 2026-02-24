@@ -1999,7 +1999,7 @@ export const translations = {
     bpm: 'BPM',
     auto: '자동',
     duration: '길이',
-    autoDurationTooltip: '콘텐츠에서 길이 자동 감지（기본값 약 60초）',
+    autoDurationTooltip: '콘텐츠에서 길이 자동 감지(기본값 약 60초)',
     seconds: '초',
     keyScale: '키와 스케일',
     timeSignature: '박자',
