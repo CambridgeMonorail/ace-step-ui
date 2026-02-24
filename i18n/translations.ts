@@ -190,6 +190,7 @@ export const translations = {
     bpm: 'BPM',
     auto: 'Auto',
     duration: 'Duration',
+    autoDurationTooltip: 'Auto-detect duration from content (defaults to ~60s)',
     seconds: 's',
     keyScale: 'Key & Scale',
     timeSignature: 'Time Signature',
@@ -313,9 +314,12 @@ export const translations = {
     // CreatePanel - Actions
     generate: 'Generate',
     generating: 'Generating...',
+    servicesUnavailable: 'AI music generation service unavailable. Please check if ACE-Step API is running.',
     createButton: 'Create',
     formatLyrics: 'Format Lyrics',
     formatting: 'Formatting...',
+    formatStyleTooltip: 'AI Format - Enhance style description and auto-fill parameters (requires style to be filled)',
+    formatLyricsTooltip: 'AI Format - Enhance lyrics based on musical style (requires style to be filled)',
     clearAll: 'Clear All',
     
     // Simple Mode
@@ -789,6 +793,7 @@ export const translations = {
     bpm: '曲速*(BPM)',
     auto: '自动',
     duration: '时长',
+    autoDurationTooltip: '从内容自动检测时长（默认约60秒）',
     seconds: '秒',
     keyScale: '调式',
     timeSignature: '拍号',
@@ -912,9 +917,12 @@ export const translations = {
     // CreatePanel - Actions
     generate: '生成',
     generating: '生成中...',
+    servicesUnavailable: 'AI音乐生成服务不可用。请检查ACE-Step API是否正在运行。',
     createButton: '创建',
     formatLyrics: '格式化歌词',
     formatting: '格式化中...',
+    formatStyleTooltip: 'AI格式化 - 增强风格描述并自动填充参数（需要填写风格）',
+    formatLyricsTooltip: 'AI格式化 - 根据音乐风格增强歌词（需要填写风格）',
     clearAll: '清空全部',
     
     // Simple Mode
@@ -1388,6 +1396,7 @@ export const translations = {
     bpm: 'BPM',
     auto: '自動',
     duration: '長さ',
+    autoDurationTooltip: 'コンテンツから長さを自動検出（デフォルト約60秒）',
     seconds: '秒',
     keyScale: 'キーとスケール',
     timeSignature: '拍子',
@@ -1511,9 +1520,12 @@ export const translations = {
     // CreatePanel - Actions
     generate: '生成',
     generating: '生成中...',
+    servicesUnavailable: 'AI音楽生成サービスが利用できません。ACE-Step APIが実行されているか確認してください。',
     createButton: '作成',
     formatLyrics: '歌詞をフォーマット',
     formatting: 'フォーマット中...',
+    formatStyleTooltip: 'AIフォーマット - スタイル説明を強化しパラメータを自動入力（スタイルの入力が必要）',
+    formatLyricsTooltip: 'AIフォーマット - 音楽スタイルに基づいて歌詞を強化（スタイルの入力が必要）',
     clearAll: 'すべてクリア',
     
     // Simple Mode
@@ -1987,6 +1999,7 @@ export const translations = {
     bpm: 'BPM',
     auto: '자동',
     duration: '길이',
+    autoDurationTooltip: '콘텐츠에서 길이 자동 감지(기본값 약 60초)',
     seconds: '초',
     keyScale: '키와 스케일',
     timeSignature: '박자',
@@ -2110,9 +2123,12 @@ export const translations = {
     // CreatePanel - Actions
     generate: '생성',
     generating: '생성 중...',
+    servicesUnavailable: 'AI 음악 생성 서비스를 사용할 수 없습니다. ACE-Step API가 실행 중인지 확인하세요.',
     createButton: '만들기',
     formatLyrics: '가사 포맷',
     formatting: '포맷 중...',
+    formatStyleTooltip: 'AI 포맷 - 스타일 설명 향상 및 매개변수 자동 입력 (스타일 입력 필요)',
+    formatLyricsTooltip: 'AI 포맷 - 음악 스타일에 따라 가사 향상 (스타일 입력 필요)',
     clearAll: '모두 지우기',
     
     // Simple Mode

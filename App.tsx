@@ -38,6 +38,9 @@ function AppContent() {
   // Track multiple concurrent generation jobs
   const activeJobsRef = useRef<Map<string, { tempId: string; pollInterval: ReturnType<typeof setInterval> }>>(new Map());
   const [activeJobCount, setActiveJobCount] = useState(0);
+  
+  // Service Health Status
+  const [serviceHealth, setServiceHealth] = useState<{ healthy: boolean; error?: string } | null>(null);
 
   // Theme State
   const [theme, setTheme] = useState<'dark' | 'light'>(() => {
@@ -169,6 +172,26 @@ function AppContent() {
 
   // Keep selectedSongRef in sync for use in callbacks without stale closures
   useEffect(() => { selectedSongRef.current = selectedSong; }, [selectedSong]);
+
+  // Check service health on mount and periodically
+  useEffect(() => {
+    const checkHealth = async () => {
+      try {
+        const health = await generateApi.checkHealth();
+        setServiceHealth(health);
+      } catch (error) {
+        console.error('Health check failed:', error);
+        setServiceHealth({ healthy: false, error: 'Failed to connect to backend' });
+      }
+    };
+
+    // Check immediately
+    checkHealth();
+
+    // Then check every 30 seconds
+    const interval = setInterval(checkHealth, 30000);
+    return () => clearInterval(interval);
+  }, []);
 
   // Cleanup active jobs on unmount
   useEffect(() => {
@@ -801,7 +824,7 @@ function AppContent() {
         title: params.title,
         instrumental: params.instrumental,
         vocalLanguage: params.vocalLanguage,
-        duration: params.duration && params.duration > 0 ? params.duration : undefined,
+        duration: params.duration,
         bpm: params.bpm,
         keyScale: params.keyScale,
         timeSignature: params.timeSignature,
@@ -820,7 +843,9 @@ function AppContent() {
         lmTopP: params.lmTopP,
         lmNegativePrompt: params.lmNegativePrompt,
         lmBackend: params.lmBackend,
-        lmModel: params.lmModel,
+        lmModelPath: params.lmModelPath,
+        sampleMode: params.sampleMode,
+        sampleQuery: params.sampleQuery,
         referenceAudioUrl: params.referenceAudioUrl,
         sourceAudioUrl: params.sourceAudioUrl,
         referenceAudioTitle: params.referenceAudioTitle,
@@ -1311,6 +1336,7 @@ function AppContent() {
                 createdSongs={songs}
                 pendingAudioSelection={pendingAudioSelection}
                 onAudioSelectionApplied={() => setPendingAudioSelection(null)}
+                serviceHealth={serviceHealth}
               />
             </div>
 

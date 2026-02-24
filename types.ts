@@ -90,7 +90,11 @@ export interface GenerationParams {
   lmTopP: number;
   lmNegativePrompt: string;
   lmBackend?: 'pt' | 'vllm';
-  lmModel?: string;
+  lmModelPath?: string;
+
+  // Sample Mode (for Simple Mode auto-generation)
+  sampleMode?: boolean;
+  sampleQuery?: string;
 
   // Expert Parameters
   referenceAudioUrl?: string;

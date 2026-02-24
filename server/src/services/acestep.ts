@@ -147,16 +147,16 @@ async function buildGradioArgs(params: GenerationParams): Promise<unknown[]> {
   return [
     prompt,                                                       //  0: Music Caption
     lyrics,                                                       //  1: Lyrics
-    params.bpm && params.bpm > 0 ? params.bpm : 0,               //  2: BPM (0 = auto)
+    (typeof params.bpm === 'number' && params.bpm > 0) ? params.bpm : 0, //  2: BPM (0 = auto)
     params.keyScale || '',                                        //  3: KeyScale
     params.timeSignature || '',                                   //  4: Time Signature
     params.vocalLanguage || 'en',                                 //  5: Vocal Language
     params.inferenceSteps ?? 8,                                   //  6: DiT Inference Steps
     params.guidanceScale ?? 7.0,                                  //  7: DiT Guidance Scale
     params.randomSeed !== false,                                  //  8: Random Seed
-    String(params.seed ?? -1),                                    //  9: Seed
+    params.seed ?? -1,                                            //  9: Seed (number, not string)
     referenceAudio,                                               // 10: Reference Audio (filepath | null)
-    params.duration && params.duration > 0 ? params.duration : -1, // 11: Audio Duration (-1 = auto)
+    (typeof params.duration === 'number' && params.duration > 0) ? params.duration : -1, // 11: Audio Duration (-1 = auto)
     Math.min(Math.max(params.batchSize ?? 1, 1), 16),            // 12: Batch Size (clamped 1-16)
     sourceAudio,                                                  // 13: Source Audio (filepath | null)
     params.audioCodes || '',                                      // 14: LM Codes Hints
@@ -280,7 +280,11 @@ export interface GenerationParams {
   lmTopP?: number;
   lmNegativePrompt?: string;
   lmBackend?: 'pt' | 'vllm';
-  lmModel?: string;
+  lmModelPath?: string;
+
+  // Sample Mode (for Simple Mode auto-generation)
+  sampleMode?: boolean;
+  sampleQuery?: string;
 
   // Expert Parameters
   referenceAudioUrl?: string;
@@ -322,6 +326,10 @@ interface GenerationResult {
   keyScale?: string;
   timeSignature?: string;
   status: string;
+  // Auto-generated metadata populated via sample_mode (independent of thinking)
+  title?: string;
+  lyrics?: string;
+  caption?: string;
 }
 
 interface JobStatus {
@@ -448,7 +456,22 @@ async function processGeneration(
     return;
   }
 
-  // Try Gradio first
+  // Use REST API for Simple Mode with sample_mode (auto-generates metadata)
+  // This uses the documented /release_task endpoint with sample_mode + sample_query
+  const useRestApi = !params.customMode && params.sampleMode;
+  
+  if (useRestApi) {
+    try {
+      console.log(`Job ${jobId}: Using REST API for Simple Mode with sample_mode=true`);
+      await processGenerationViaRestAPI(jobId, params, job);
+      return;
+    } catch (error) {
+      console.error(`Job ${jobId}: REST API generation failed, falling back to Gradio`, error);
+      // Fall through to Gradio client
+    }
+  }
+
+  // Try Gradio client for Custom Mode or if REST API is not used
   const gradioUp = await isGradioAvailable();
   if (gradioUp) {
     try {
@@ -462,6 +485,400 @@ async function processGeneration(
 
   // Fallback: Python spawn
   await processGenerationViaPython(jobId, params, job);
+}
+
+/**
+ * Derive a short, meaningful title for a generated song.
+ *
+ * The ACE-Step API does not return a separate title field, so we synthesize
+ * one from whatever information is available:
+ *   1. User-provided title (params.title) — used as-is when non-empty.
+ *   2. User's description (sampleQuery) — extract the "about …" clause.
+ *   3. Auto-generated caption (first.prompt) — use the first phrase.
+ *   4. Lyrics — use the first non-tag line.
+ *   5. Fallback to undefined (caller should default to 'Untitled').
+ */
+function deriveTitle(
+  userTitle?: string,
+  sampleQuery?: string,
+  caption?: string,
+  lyrics?: string,
+): string | undefined {
+  const MAX = 60;
+
+  // 1. User-provided title wins outright
+  if (userTitle && userTitle.trim()) return userTitle.trim();
+
+  // 2. Extract "about …" from the natural-language description
+  if (sampleQuery) {
+    const aboutMatch = sampleQuery.match(/\babout\s+(.+)/i);
+    if (aboutMatch) {
+      const raw = aboutMatch[1]
+        .replace(/,?\s*(with|featuring|using|including)\b.*$/i, '') // trim trailing clauses
+        .replace(/[.!?]+$/, '')                                    // trim punctuation
+        .trim();
+      if (raw.length > 0) {
+        // Title-case the extracted phrase
+        const titled = raw
+          .split(/\s+/)
+          .map(w => w.charAt(0).toUpperCase() + w.slice(1))
+          .join(' ');
+        return titled.length > MAX ? titled.slice(0, MAX - 1) + '…' : titled;
+      }
+    }
+    // No "about" clause — use first few significant words of the description
+    const words = sampleQuery.trim().split(/\s+/);
+    if (words.length > 0) {
+      // Skip generic openers like "A", "An", and genre descriptors
+      const phrase = words.slice(0, Math.min(6, words.length)).join(' ');
+      const titled = phrase
+        .split(/\s+/)
+        .map(w => w.charAt(0).toUpperCase() + w.slice(1))
+        .join(' ');
+      return titled.length > MAX ? titled.slice(0, MAX - 1) + '…' : titled;
+    }
+  }
+
+  // 3. First phrase of the auto-generated caption
+  if (caption) {
+    const firstSentence = caption.split(/[.!?,;—–\n]/)[0]?.trim();
+    if (firstSentence && firstSentence.length > 0) {
+      return firstSentence.length > MAX ? firstSentence.slice(0, MAX - 1) + '…' : firstSentence;
+    }
+  }
+
+  // 4. First non-tag lyrics line
+  if (lyrics) {
+    const lines = lyrics.split('\n').filter(l => l.trim() && !l.trim().startsWith('['));
+    if (lines.length > 0) {
+      const first = lines[0].trim();
+      return first.length > MAX ? first.slice(0, MAX - 1) + '…' : first;
+    }
+  }
+
+  return undefined;
+}
+
+/**
+ * Process generation using REST API (/release_task + /query_result).
+ * See local/API.md for the full endpoint specification.
+ *
+ * This path is used for Simple Mode (sample_mode + sample_query) which
+ * auto-generates caption, lyrics, and metas via the 5Hz LM before running DiT.
+ *
+ * Response parsing notes (from API.md §5.3):
+ *   - status is an integer: 0 = queued/running, 1 = succeeded, 2 = failed
+ *   - result is a JSON *string* that must be parsed into an array of objects
+ *   - each result object has: file, prompt, lyrics, metas, generation_info, etc.
+ *   - audio URLs are relative paths like /v1/audio?path=... (prepend ACESTEP_API)
+ */
+async function processGenerationViaRestAPI(
+  jobId: string,
+  params: GenerationParams,
+  job: ActiveJob,
+): Promise<void> {
+  // Determine if using Simple Mode (sample_mode workflow)
+  const usingSampleMode = params.sampleMode && params.sampleQuery;
+  const caption = params.style || 'pop music';
+  const prompt = params.customMode ? caption : (params.songDescription || caption);
+  const lyrics = params.instrumental ? '' : (params.lyrics || '');
+
+  console.log(`Job ${jobId}: Using REST API /release_task`, {
+    sampleMode: usingSampleMode,
+    sampleQuery: usingSampleMode ? params.sampleQuery?.slice(0, 50) : undefined,
+    prompt: !usingSampleMode ? prompt.slice(0, 50) : undefined,
+    thinking: params.thinking,
+    customMode: params.customMode,
+  });
+
+  // Build request body per local/API.md spec.
+  // Only include fields that have meaningful values — the API uses its own
+  // defaults for anything we omit (see §4.2 of the docs).
+  const requestBody: any = {
+    // ── Sample / description mode ──────────────────────────────────────
+    // Per docs §4.2 "Sample/Description Mode Parameters":
+    //   sample_mode: bool  – enables auto-generation of caption/lyrics/metas
+    //   sample_query: str  – natural-language description (alias: description)
+    ...(usingSampleMode && {
+      sample_mode: true,
+      sample_query: params.sampleQuery,
+    }),
+
+    // ── Custom / prompt mode ───────────────────────────────────────────
+    // Only sent when NOT using sample mode (prompt + lyrics are explicit)
+    ...(!usingSampleMode && {
+      prompt,
+      lyrics,
+    }),
+
+    // ── Core generation flags ──────────────────────────────────────────
+    thinking: params.thinking ?? false,              // docs default: false
+    vocal_language: params.vocalLanguage || 'en',    // docs default: "en"
+    audio_format: params.audioFormat || 'mp3',       // docs default: "mp3"
+    batch_size: Math.min(Math.max(params.batchSize ?? 1, 1), 8), // docs max: 8
+    inference_steps: params.inferenceSteps ?? 8,     // docs default: 8
+    guidance_scale: params.guidanceScale ?? 7.0,     // docs default: 7.0
+
+    // ── Music attributes (omit when "auto") ────────────────────────────
+    // docs: bpm range 30-300, null=auto; duration range 10-600, null=auto
+    // Omit invalid/auto values so the API picks its own defaults.
+    ...(params.duration && params.duration > 0 && { audio_duration: params.duration }),
+    ...(params.bpm && params.bpm >= 30 && { bpm: params.bpm }),
+    ...(params.keyScale && { key_scale: params.keyScale }),
+    ...(params.timeSignature && { time_signature: params.timeSignature }),
+
+    // ── Seed ───────────────────────────────────────────────────────────
+    // docs: use_random_seed=true & seed=-1 → random
+    use_random_seed: params.randomSeed !== false,
+    ...(params.randomSeed === false && typeof params.seed === 'number' && { seed: params.seed }),
+
+    // ── Model selection ────────────────────────────────────────────────
+    // docs: parameter is "model", NOT "dit_model"
+    ...(params.ditModel && { model: params.ditModel }),
+
+    // ── 5Hz LM parameters ─────────────────────────────────────────────
+    lm_model_path: params.lmModelPath || 'acestep-5Hz-lm-4B',
+    lm_backend: params.lmBackend || 'pt',
+    lm_temperature: params.lmTemperature ?? 0.85,    // docs default: 0.85
+    lm_cfg_scale: params.lmCfgScale ?? 2.5,          // docs default: 2.5
+    lm_top_p: params.lmTopP ?? 0.9,                  // docs default: 0.9
+    lm_negative_prompt: params.lmNegativePrompt || 'NO USER INPUT',
+    ...(params.lmTopK && { lm_top_k: params.lmTopK }),
+
+    // ── Advanced DiT parameters ────────────────────────────────────────
+    shift: params.shift ?? 3.0,
+    infer_method: params.inferMethod || 'ode',
+    use_adg: params.useAdg ?? false,
+    cfg_interval_start: params.cfgIntervalStart ?? 0.0,
+    cfg_interval_end: params.cfgIntervalEnd ?? 1.0,
+    ...(params.customTimesteps && { timesteps: params.customTimesteps }),
+
+    // ── LM CoT parameters ─────────────────────────────────────────────
+    use_cot_caption: params.useCotCaption ?? true,
+    use_cot_language: params.useCotLanguage ?? true,
+    ...(params.constrainedDecodingDebug && { constrained_decoding_debug: true }),
+    ...(params.allowLmBatch === false && { allow_lm_batch: false }),
+
+    // ── Format / Enhance ───────────────────────────────────────────────
+    // docs §4.2: use_format uses LM to enhance/format caption and lyrics
+    ...(params.enhance && { use_format: true }),
+
+    // ── Edit / Reference Audio ─────────────────────────────────────────
+    // docs §4.2: reference_audio_path, src_audio_path, task_type, etc.
+    ...(params.referenceAudioUrl && { reference_audio_path: params.referenceAudioUrl }),
+    ...(params.sourceAudioUrl && { src_audio_path: params.sourceAudioUrl }),
+    ...(params.audioCodes && { audio_code_string: params.audioCodes }),
+    ...(params.taskType && params.taskType !== 'text2music' && { task_type: params.taskType }),
+    ...(params.instruction && { instruction: params.instruction }),
+    ...(params.repaintingStart != null && { repainting_start: params.repaintingStart }),
+    ...(params.repaintingEnd != null && { repainting_end: params.repaintingEnd }),
+    ...(params.audioCoverStrength != null && { audio_cover_strength: params.audioCoverStrength }),
+  };
+
+  job.stage = 'Submitting to REST API...';
+
+  // Submit generation task
+  const submitResponse = await fetch(`${ACESTEP_API}/release_task`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(requestBody),
+  });
+
+  if (!submitResponse.ok) {
+    throw new Error(`REST API submission failed: ${submitResponse.status} ${submitResponse.statusText}`);
+  }
+
+  const submitData = await submitResponse.json() as {
+    data: { task_id: string; status: string };
+  };
+
+  const taskId = submitData.data.task_id;
+  job.taskId = taskId;
+  console.log(`Job ${jobId}: REST API task created: ${taskId}`);
+
+  // Poll for completion
+  // Per local/API.md §3: status 0 = queued/running, 1 = succeeded, 2 = failed
+  // Per local/API.md §5.3: result is a JSON string, must be parsed
+  job.stage = 'Generating music...';
+  let taskComplete = false;
+  let pollAttempts = 0;
+  const maxPollAttempts = 600; // 10 minutes timeout (1s interval)
+
+  while (!taskComplete && pollAttempts < maxPollAttempts) {
+    await new Promise(resolve => setTimeout(resolve, 1000));
+    pollAttempts++;
+
+    const statusResponse = await fetch(`${ACESTEP_API}/query_result`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ task_id_list: [taskId] }),
+    });
+
+    if (!statusResponse.ok) {
+      throw new Error(`REST API status check failed: ${statusResponse.status}`);
+    }
+
+    // Response shape per §5.3:
+    // { data: [{ task_id, status: int, result: string, progress_text?: string }] }
+    const statusData = await statusResponse.json() as {
+      data: Array<{
+        task_id: string;
+        status: number;          // 0=queued/running, 1=succeeded, 2=failed
+        result?: string;         // JSON string — must be parsed
+        progress_text?: string;  // LM progress info while running
+      }>;
+    };
+
+    const taskResult = statusData.data[0];
+    if (!taskResult) {
+      if (pollAttempts % 10 === 0) {
+        console.log(`Job ${jobId}: Polling... no task entry yet (attempt ${pollAttempts})`);
+      }
+      continue;
+    }
+
+    // Status is an integer per §3
+    const status = taskResult.status;
+
+    if (pollAttempts % 10 === 0) {
+      console.log(`Job ${jobId}: status=${status}, poll attempt ${pollAttempts}`);
+    }
+
+    // Update stage with progress text if available (shows LM reasoning progress)
+    if (taskResult.progress_text) {
+      job.stage = `Generating: ${taskResult.progress_text.slice(-80)}`;
+    }
+
+    if (status === 2) {
+      // §3: status 2 = failed
+      throw new Error(`REST API task failed: ${taskResult.result || 'Unknown error'}`);
+    }
+
+    if (status === 1) {
+      // §3: status 1 = succeeded
+      taskComplete = true;
+
+      // §5.3: result is a JSON string containing an array of result objects
+      // Each object has: file, wave, status, prompt, lyrics, metas, generation_info, etc.
+      let resultItems: Array<{
+        file?: string;
+        status?: number;
+        prompt?: string;
+        lyrics?: string;
+        metas?: { bpm?: number; duration?: number; keyscale?: string; timesignature?: string };
+        generation_info?: string;
+        seed_value?: string;
+        lm_model?: string;
+        dit_model?: string;
+      }>;
+
+      try {
+        resultItems = JSON.parse(taskResult.result || '[]');
+      } catch (parseErr) {
+        throw new Error(`Failed to parse REST API result JSON: ${parseErr}`);
+      }
+
+      if (!Array.isArray(resultItems) || resultItems.length === 0) {
+        throw new Error('REST API returned empty result array');
+      }
+
+      // Download audio files
+      // §10: audio URLs are relative paths like /v1/audio?path=...
+      const audioUrls: string[] = [];
+      let actualDuration = 0;
+
+      for (const item of resultItems) {
+        if (!item.file) continue;
+
+        // Build full URL: ACESTEP_API + item.file
+        const audioDownloadUrl = item.file.startsWith('http')
+          ? item.file
+          : `${ACESTEP_API}${item.file}`;
+
+        const ext = audioDownloadUrl.includes('.flac') ? '.flac' : `.${params.audioFormat || 'mp3'}`;
+        const filename = `${jobId}_${audioUrls.length}${ext}`;
+        const destPath = path.join(AUDIO_DIR, filename);
+
+        await mkdir(AUDIO_DIR, { recursive: true });
+
+        const audioResponse = await fetch(audioDownloadUrl);
+        if (!audioResponse.ok) {
+          console.error(`Job ${jobId}: Failed to download audio: ${audioResponse.status} from ${audioDownloadUrl}`);
+          continue;
+        }
+
+        const buffer = Buffer.from(await audioResponse.arrayBuffer());
+        if (buffer.length === 0) {
+          console.error(`Job ${jobId}: Downloaded audio file is empty`);
+          continue;
+        }
+        await writeFile(destPath, buffer);
+
+        if (audioUrls.length === 0) {
+          actualDuration = getAudioDuration(destPath);
+        }
+
+        audioUrls.push(`/audio/${filename}`);
+      }
+
+      if (audioUrls.length === 0) {
+        throw new Error('REST API returned no downloadable audio files');
+      }
+
+      // Extract metadata from the first result item (§5.3 result field description)
+      const first = resultItems[0];
+      const apiDuration = typeof first.metas?.duration === 'number' && first.metas.duration > 0
+        ? first.metas.duration
+        : undefined;
+      const paramDuration = typeof params.duration === 'number' && params.duration > 0
+        ? params.duration
+        : undefined;
+      const finalDuration = actualDuration > 0
+        ? actualDuration
+        : (apiDuration ?? paramDuration ?? 60);
+
+      // Generate a title since the API doesn't return one.
+      // Priority: params.title (user-provided) > derive from sampleQuery > derive from caption
+      const autoTitle = deriveTitle(
+        params.title,
+        params.sampleQuery,
+        first.prompt,
+        first.lyrics,
+      );
+
+      job.status = 'succeeded';
+      job.result = {
+        audioUrls,
+        duration: finalDuration,
+        bpm: first.metas?.bpm || params.bpm,
+        keyScale: first.metas?.keyscale || params.keyScale,
+        timeSignature: first.metas?.timesignature || params.timeSignature,
+        // Auto-generated metadata from sample_mode (independent of thinking)
+        title: autoTitle,
+        lyrics: first.lyrics,
+        caption: first.prompt,  // §5.3: "prompt" field contains the generated/enhanced caption
+        status: 'succeeded',
+      };
+      job.rawResponse = statusData;
+      console.log(`Job ${jobId}: Completed via REST API`, {
+        audioFiles: audioUrls.length,
+        lyricsPreview: first.lyrics?.substring(0, 80),
+        captionPreview: first.prompt?.substring(0, 80),
+        metas: first.metas,
+        generationInfo: first.generation_info,
+      });
+
+    } else if (status === 0) {
+      // §3: status 0 = still queued or running, keep polling
+      job.stage = taskResult.progress_text
+        ? `Generating: ${taskResult.progress_text.slice(-80)}`
+        : 'Generating music...';
+    }
+  }
+
+  if (!taskComplete) {
+    throw new Error(`REST API generation timed out after ${pollAttempts} seconds`);
+  }
 }
 
 async function processGenerationViaGradio(
@@ -547,9 +964,15 @@ async function processGenerationViaGradio(
   // Parse metadata from generation details if available
   const metas = parseGenerationDetails(genDetails);
 
+  const metaDuration = typeof metas.duration === 'number' && metas.duration > 0
+    ? metas.duration
+    : undefined;
+  const paramDuration = typeof params.duration === 'number' && params.duration > 0
+    ? params.duration
+    : undefined;
   const finalDuration = actualDuration > 0
     ? actualDuration
-    : (metas.duration || params.duration || 60);
+    : (metaDuration ?? paramDuration ?? 60);
 
   job.status = 'succeeded';
   job.result = {
@@ -558,6 +981,10 @@ async function processGenerationViaGradio(
     bpm: metas.bpm || params.bpm,
     keyScale: metas.keyScale || params.keyScale,
     timeSignature: metas.timeSignature || params.timeSignature,
+    // Include auto-generated content from Simple Mode (when autogen=true)
+    title: metas.title,
+    lyrics: metas.lyrics,
+    caption: metas.caption,
     status: 'succeeded',
   };
   job.rawResponse = { genDetails, genStatus };
@@ -573,19 +1000,31 @@ function parseGenerationDetails(details: string | undefined): {
   duration?: number;
   keyScale?: string;
   timeSignature?: string;
+  title?: string;
+  lyrics?: string;
+  caption?: string;
 } {
   if (!details) return {};
   try {
-    // Generation details may contain key-value pairs
+    // Generation details may contain key-value pairs and auto-generated content
     const bpmMatch = details.match(/BPM:\s*(\d+)/i);
     const durationMatch = details.match(/Duration:\s*([\d.]+)/i);
     const keyMatch = details.match(/Key:\s*([A-G][#b]?\s*(?:major|minor))/i);
     const timeMatch = details.match(/Time Signature:\s*(\d+\/\d+)/i);
+    
+    // Extract auto-generated content (from Simple Mode autogen)
+    const titleMatch = details.match(/Title:\s*(.+?)(?:\n|$)/i);
+    const lyricsMatch = details.match(/Lyrics:\s*([\s\S]+?)(?:\n(?:BPM|Key|Time|Duration|Caption|Title|$))/i);
+    const captionMatch = details.match(/Caption:\s*(.+?)(?:\n|$)/i);
+    
     return {
       bpm: bpmMatch ? parseInt(bpmMatch[1]) : undefined,
       duration: durationMatch ? parseFloat(durationMatch[1]) : undefined,
       keyScale: keyMatch ? keyMatch[1] : undefined,
       timeSignature: timeMatch ? timeMatch[1] : undefined,
+      title: titleMatch ? titleMatch[1].trim() : undefined,
+      lyrics: lyricsMatch ? lyricsMatch[1].trim() : undefined,
+      caption: captionMatch ? captionMatch[1].trim() : undefined,
     };
   } catch {
     return {};

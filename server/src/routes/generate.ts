@@ -66,9 +66,11 @@ interface GenerateBody {
   lyrics: string;
   style: string;
   title: string;
+  ditModel?: string;
 
   // Common
   instrumental: boolean;
+  enhance?: boolean;
   vocalLanguage?: string;
 
   // Music Parameters
@@ -95,7 +97,11 @@ interface GenerateBody {
   lmTopP?: number;
   lmNegativePrompt?: string;
   lmBackend?: 'pt' | 'vllm';
-  lmModel?: string;
+  lmModelPath?: string;
+  
+  // Sample Mode (auto-generate from description)
+  sampleMode?: boolean;
+  sampleQuery?: string;
 
   // Expert Parameters
   referenceAudioUrl?: string;
@@ -188,7 +194,9 @@ router.post('/', authMiddleware, async (req: AuthenticatedRequest, res: Response
       lyrics,
       style,
       title,
+      ditModel,
       instrumental,
+      enhance,
       vocalLanguage,
       duration,
       bpm,
@@ -209,7 +217,9 @@ router.post('/', authMiddleware, async (req: AuthenticatedRequest, res: Response
       lmTopP,
       lmNegativePrompt,
       lmBackend,
-      lmModel,
+      lmModelPath,
+      sampleMode,
+      sampleQuery,
       referenceAudioUrl,
       sourceAudioUrl,
       referenceAudioTitle,
@@ -249,13 +259,17 @@ router.post('/', authMiddleware, async (req: AuthenticatedRequest, res: Response
       return;
     }
 
+    console.log(`[Generate] mode=${customMode ? 'custom' : 'simple'}, sampleMode=${sampleMode}`);
+
     const params = {
       customMode,
       songDescription,
       lyrics,
       style,
       title,
+      ditModel,
       instrumental,
+      enhance,
       vocalLanguage,
       duration,
       bpm,
@@ -276,7 +290,9 @@ router.post('/', authMiddleware, async (req: AuthenticatedRequest, res: Response
       lmTopP,
       lmNegativePrompt,
       lmBackend,
-      lmModel,
+      lmModelPath,
+      sampleMode,
+      sampleQuery,
       referenceAudioUrl,
       sourceAudioUrl,
       referenceAudioTitle,
@@ -392,7 +408,11 @@ router.get('/status/:jobId', authMiddleware, async (req: AuthenticatedRequest, r
             for (let i = 0; i < audioUrls.length; i++) {
               const audioUrl = audioUrls[i];
               const variationSuffix = audioUrls.length > 1 ? ` (v${i + 1})` : '';
-              const songTitle = (params.title || 'Untitled') + variationSuffix;
+              
+              // Use auto-generated title/lyrics/style if available (from Simple Mode autogen)
+              const songTitle = (aceStatus.result.title || params.title || 'Untitled') + variationSuffix;
+              const songLyrics = params.instrumental ? '[Instrumental]' : (aceStatus.result.lyrics || params.lyrics);
+              const songStyle = aceStatus.result.caption || params.style;
 
               const songId = generateUUID();
 
@@ -412,9 +432,9 @@ router.get('/status/:jobId', authMiddleware, async (req: AuthenticatedRequest, r
                     songId,
                     req.user!.id,
                     songTitle,
-                    params.instrumental ? '[Instrumental]' : params.lyrics,
-                    params.style,
-                    params.style,
+                    songLyrics,
+                    songStyle,
+                    songStyle,
                     storedPath,
                     aceStatus.result.duration && aceStatus.result.duration > 0 ? aceStatus.result.duration : (params.duration && params.duration > 0 ? params.duration : 120),
                     aceStatus.result.bpm || params.bpm,
@@ -438,9 +458,9 @@ router.get('/status/:jobId', authMiddleware, async (req: AuthenticatedRequest, r
                     songId,
                     req.user!.id,
                     songTitle,
-                    params.instrumental ? '[Instrumental]' : params.lyrics,
-                    params.style,
-                    params.style,
+                    songLyrics,
+                    songStyle,
+                    songStyle,
                     audioUrl,
                     aceStatus.result.duration && aceStatus.result.duration > 0 ? aceStatus.result.duration : (params.duration && params.duration > 0 ? params.duration : 120),
                     aceStatus.result.bpm || params.bpm,

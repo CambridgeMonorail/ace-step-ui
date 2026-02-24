@@ -23,6 +23,30 @@ from acestep.model_downloader import download_submodel
 # Global handler
 _llm_handler = None
 
+def _verify_model_files_exist(model_dir: str, lm_model_path: str) -> bool:
+    """Verify that model weight files (.safetensors) actually exist.
+    
+    This checks for the actual model weights, not just config/tokenizer files.
+    Different models have different file structures:
+    - 0.6B/1.7B: Single model.safetensors file
+    - 4B: Two sharded files (model-00001-of-00002.safetensors, model-00002-of-00002.safetensors)
+    """
+    if not os.path.exists(model_dir):
+        return False
+    
+    # Determine required files based on model size
+    if "4B" in lm_model_path:
+        # 4B model is sharded into 2 files
+        required_files = [
+            "model-00001-of-00002.safetensors",
+            "model-00002-of-00002.safetensors"
+        ]
+    else:
+        # 0.6B and 1.7B models use single file
+        required_files = ["model.safetensors"]
+    
+    return all(os.path.exists(os.path.join(model_dir, f)) for f in required_files)
+
 def get_llm_handler(lm_model=None, lm_backend=None):
     global _llm_handler
     if _llm_handler is None:
@@ -31,10 +55,10 @@ def get_llm_handler(lm_model=None, lm_backend=None):
         lm_model_path = lm_model or "acestep-5Hz-lm-0.6B"  # Default to smallest model
         backend = lm_backend or "pt"
 
-        # Auto-download model if not present
+        # Auto-download model if required weight files are missing
         model_dir = os.path.join(checkpoint_dir, lm_model_path)
-        if not os.path.exists(model_dir) or not os.listdir(model_dir):
-            print(f"[format_sample] Model {lm_model_path} not found, downloading...")
+        if not _verify_model_files_exist(model_dir, lm_model_path):
+            print(f"[format_sample] Model {lm_model_path} not found or incomplete, downloading...")
             success, msg = download_submodel(lm_model_path, Path(checkpoint_dir))
             if not success:
                 raise RuntimeError(f"Failed to download model {lm_model_path}: {msg}")
